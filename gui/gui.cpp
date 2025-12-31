@@ -16,6 +16,7 @@ constexpr int kHeight = 480;
 constexpr SDL_Rect kPanelRect{20, 20, 600, 440};
 constexpr SDL_Rect kTextboxRect{40, 60, 400, 40};
 constexpr SDL_Rect kButtonRect{460, 60, 120, 40};
+constexpr SDL_Rect kOptionsButtonRect{460, 120, 120, 40};
 
 constexpr SDL_Color kTextColor{230, 230, 240, 255};
 constexpr SDL_Color kTextShadow{30, 30, 40, 100};
@@ -42,7 +43,7 @@ std::string run_fetch(const std::string& symbol) {
     if (symbol.empty()) {
         return "No symbol provided";
     }
-    std::string cmd = "python3 py/yfinance/fetch.py " + symbol;
+    std::string cmd = "python3 py/yfclient/fetch.py " + symbol;
     std::array<char, 256> buffer{};
     std::string result;
     FILE* pipe = popen(cmd.c_str(), "r");
@@ -56,6 +57,29 @@ std::string run_fetch(const std::string& symbol) {
     if (rc != 0 && result.empty()) {
         std::ostringstream oss;
         oss << "Python fetch exited with code " << rc;
+        return oss.str();
+    }
+    return result;
+}
+
+std::string run_options_fetch(const std::string& symbol) {
+    if (symbol.empty()) {
+        return "No symbol provided";
+    }
+    std::string cmd = "python3 py/options/cli_fetch.py " + symbol;
+    std::array<char, 256> buffer{};
+    std::string result;
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return "Failed to start Python options fetch";
+    }
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+        result += buffer.data();
+    }
+    int rc = pclose(pipe);
+    if (rc != 0 && result.empty()) {
+        std::ostringstream oss;
+        oss << "Python options fetch exited with code " << rc;
         return oss.str();
     }
     return result;
@@ -140,21 +164,21 @@ SDL_Texture* Gui::render_text(const std::string& text, SDL_Color color) {
     return tex;
 }
 
-void Gui::render_button(bool hovered) {
+void Gui::render_button(const SDL_Rect& rect, const std::string& label, bool hovered) {
     SDL_SetRenderDrawColor(m_renderer,
                            hovered ? 100 : kButtonColor.r,
                            hovered ? 180 : kButtonColor.g,
                            hovered ? 240 : kButtonColor.b,
                            255);
-    SDL_RenderFillRect(m_renderer, &kButtonRect);
+    SDL_RenderFillRect(m_renderer, &rect);
     SDL_SetRenderDrawColor(m_renderer, 20, 20, 30, 255);
-    SDL_RenderDrawRect(m_renderer, &kButtonRect);
+    SDL_RenderDrawRect(m_renderer, &rect);
 
-    SDL_Texture* tex = render_text("Print", kTextColor);
+    SDL_Texture* tex = render_text(label, kTextColor);
     if (tex) {
         int w, h;
         SDL_QueryTexture(tex, nullptr, nullptr, &w, &h);
-        SDL_Rect dst{kButtonRect.x + (kButtonRect.w - w) / 2, kButtonRect.y + (kButtonRect.h - h) / 2, w, h};
+        SDL_Rect dst{rect.x + (rect.w - w) / 2, rect.y + (rect.h - h) / 2, w, h};
         SDL_RenderCopy(m_renderer, tex, nullptr, &dst);
         SDL_DestroyTexture(tex);
     }
@@ -186,7 +210,7 @@ void Gui::render_textbox(bool hovered) {
     if (tex) SDL_DestroyTexture(tex);
 }
 
-void Gui::render_frame(bool button_hovered, int mouse_x, int mouse_y) {
+void Gui::render_frame(bool fetch_hovered, bool opts_hovered, int mouse_x, int mouse_y) {
     SDL_SetRenderDrawColor(m_renderer, 30, 30, 40, 255);
     SDL_RenderClear(m_renderer);
 
@@ -197,7 +221,8 @@ void Gui::render_frame(bool button_hovered, int mouse_x, int mouse_y) {
 
     bool textbox_hovered = point_in_rect(mouse_x, mouse_y, kTextboxRect);
     render_textbox(textbox_hovered);
-    render_button(button_hovered);
+    render_button(kButtonRect, "Print", fetch_hovered);
+    render_button(kOptionsButtonRect, "Options", opts_hovered);
 
     SDL_RenderPresent(m_renderer);
 }
@@ -209,7 +234,8 @@ void Gui::run() {
 
     SDL_Event event;
     while (m_running) {
-        bool button_hovered = false;
+        bool fetch_hovered = false;
+        bool options_hovered = false;
         int mouse_x = -1;
         int mouse_y = -1;
 
@@ -219,7 +245,8 @@ void Gui::run() {
             } else if (event.type == SDL_MOUSEMOTION) {
                 mouse_x = event.motion.x;
                 mouse_y = event.motion.y;
-                button_hovered = point_in_rect(mouse_x, mouse_y, kButtonRect);
+                fetch_hovered = point_in_rect(mouse_x, mouse_y, kButtonRect);
+                options_hovered = point_in_rect(mouse_x, mouse_y, kOptionsButtonRect);
             } else if (event.type == SDL_MOUSEBUTTONDOWN) {
                 SDL_Point p{event.button.x, event.button.y};
                 mouse_x = p.x;
@@ -229,6 +256,10 @@ void Gui::run() {
                     std::cout << "Textbox content: \"" << m_input_text << "\"\n";
                     std::cout << "Sanitized symbol: \"" << symbol << "\"\n";
                     std::cout << "Python fetch output:\n" << run_fetch(symbol) << std::flush;
+                } else if (point_in_rect(mouse_x, mouse_y, kOptionsButtonRect)) {
+                    const std::string symbol = sanitize_symbol(m_input_text);
+                    std::cout << "Options fetch for: \"" << symbol << "\"\n";
+                    std::cout << "Python options output:\n" << run_options_fetch(symbol) << std::flush;
                 }
                 m_textbox_focused = point_in_rect(mouse_x, mouse_y, kTextboxRect);
             } else if (event.type == SDL_TEXTINPUT) {
@@ -244,7 +275,7 @@ void Gui::run() {
             }
         }
 
-        render_frame(button_hovered, mouse_x, mouse_y);
+        render_frame(fetch_hovered, options_hovered, mouse_x, mouse_y);
     }
 }
 

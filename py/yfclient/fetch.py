@@ -22,13 +22,10 @@ def fetch_quote(symbol: str) -> Quote:
 
     ticker = yf.Ticker(symbol)
     info = getattr(ticker, "fast_info", None)
-    currency = None
-    last_price = None
-    prev_close = None
-    if info:
-        currency = getattr(info, "currency", None)
-        last_price = getattr(info, "last_price", None)
-        prev_close = getattr(info, "previous_close", None)
+    currency = getattr(info, "currency", None) if info else None
+    last_price = getattr(info, "last_price", None) if info else None
+    prev_close = getattr(info, "previous_close", None) if info else None
+
     return Quote(
         symbol=symbol,
         currency=currency,
